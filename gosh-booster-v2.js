@@ -1,148 +1,217 @@
 /**
- * GOSH.RENT Performance Booster v1.1
+ * GOSH.RENT Performance Booster v2.0
  * ===================================
- * Безопасная оптимизация скорости для Tilda-сайта gosh.rent
+ * Агрессивная оптимизация для мобильных: цель FCP < 1с
  *
- * Подход: MutationObserver перехватывает тяжёлые скрипты при вставке в DOM,
- * удаляет их и загружает с задержкой 4 секунды после window.load.
- *
- * НЕ трогаем: Yandex Metrika, Roistat, TravelLine, Tilda CDN, jQuery, наши скрипты.
- * Откладываем: Bitrix24, 101Hotels, vOtpusk, снежинки.
+ * Стратегия:
+ * - Preconnect к критичным доменам
+ * - НЕМЕДЛЕННО откладываем: Bitrix24, 101Hotels, vOtpusk, снежинки (4с после load)
+ * - LAZY-SCROLL: TravelLine IBE + Яндекс Карты грузятся ТОЛЬКО когда юзер скроллит к ним
+ * - НЕ трогаем: Yandex Metrika, Roistat (аналитика должна работать с первой секунды)
+ * - Lazy images + font-display: swap + hero preload
  */
 
 (function() {
   'use strict';
 
   // =====================================================================
-  // 1. PRECONNECT — ранние DNS + TCP + TLS хэндшейки
+  // 1. PRECONNECT + DNS-PREFETCH
   // =====================================================================
-  var preconnects = [
-    'https://static.tildacdn.com',
-    'https://cdn.jsdelivr.net',
-    'https://mc.yandex.ru',
-    'https://secure.travelline.ru',
-    'https://cloud.roistat.com'
+  var hints = [
+    ['preconnect', 'https://static.tildacdn.com'],
+    ['preconnect', 'https://cdn.jsdelivr.net'],
+    ['preconnect', 'https://mc.yandex.ru'],
+    ['preconnect', 'https://cloud.roistat.com'],
+    ['dns-prefetch', 'https://cllctr.roistat.com'],
+    ['dns-prefetch', 'https://api-maps.yandex.ru'],
+    ['dns-prefetch', 'https://ru-ibe.tlintegration.ru'],
+    ['dns-prefetch', 'https://secure.travelline.ru']
   ];
 
-  for (var i = 0; i < preconnects.length; i++) {
+  for (var i = 0; i < hints.length; i++) {
     var link = document.createElement('link');
-    link.rel = 'preconnect';
-    link.href = preconnects[i];
-    link.crossOrigin = 'anonymous';
-    document.head.appendChild(link);
-  }
-
-  // DNS-prefetch для вторичных доменов
-  var dnsPrefetch = [
-    'https://cllctr.roistat.com',
-    'https://api-maps.yandex.ru',
-    'https://ru-ibe.tlintegration.ru',
-    'https://cdn-ru.bitrix24.ru'
-  ];
-
-  for (var i = 0; i < dnsPrefetch.length; i++) {
-    var link = document.createElement('link');
-    link.rel = 'dns-prefetch';
-    link.href = dnsPrefetch[i];
+    link.rel = hints[i][0];
+    link.href = hints[i][1];
+    if (hints[i][0] === 'preconnect') link.crossOrigin = 'anonymous';
     document.head.appendChild(link);
   }
 
   // =====================================================================
-  // 2. ОТЛОЖЕННАЯ ЗАГРУЗКА ТЯЖЁЛЫХ СКРИПТОВ (MutationObserver)
-  // =====================================================================
-
-  // Паттерны для отложения (только маркетинговые виджеты/эффекты)
-  var DEFER_PATTERNS = [
-    'bitrix24',
-    'b24-',
-    'cdn-ru.bitrix24.ru',
-    '101hotels',
-    'votpusk',
-    'snow',
-    'snowflake'
-  ];
-
-  function shouldDefer(src) {
-    if (!src) return false;
-    var s = src.toLowerCase();
-    for (var i = 0; i < DEFER_PATTERNS.length; i++) {
-      if (s.indexOf(DEFER_PATTERNS[i]) !== -1) return true;
-    }
-    return false;
-  }
-
-  var deferredScripts = [];
-
-  // MutationObserver перехватывает скрипты при вставке в DOM
-  var observer = new MutationObserver(function(mutations) {
-    for (var i = 0; i < mutations.length; i++) {
-      var addedNodes = mutations[i].addedNodes;
-      for (var j = 0; j < addedNodes.length; j++) {
-        var node = addedNodes[j];
-        if (node.tagName === 'SCRIPT' && node.src && shouldDefer(node.src)) {
-          // Сохраняем src и удаляем скрипт из DOM
-          deferredScripts.push(node.src);
-          node.parentNode.removeChild(node);
-        }
-      }
-    }
-  });
-
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true
-  });
-
-  // Загружаем отложенные скрипты через 4 секунды после load
-  function loadDeferred() {
-    observer.disconnect(); // Отключаем observer чтобы не перехватывать повторно
-
-    if (deferredScripts.length === 0) return;
-
-    var idx = 0;
-    function loadNext() {
-      if (idx >= deferredScripts.length) return;
-      var s = document.createElement('script');
-      s.async = true;
-      s.src = deferredScripts[idx++];
-      document.body.appendChild(s);
-      setTimeout(loadNext, 200);
-    }
-    loadNext();
-  }
-
-  if (document.readyState === 'complete') {
-    setTimeout(loadDeferred, 4000);
-  } else {
-    window.addEventListener('load', function() {
-      setTimeout(loadDeferred, 4000);
-    });
-  }
-
-  // =====================================================================
-  // 3. FONT-DISPLAY: SWAP — предотвращаем FOIT (невидимый текст)
+  // 2. FONT-DISPLAY: SWAP (сразу, чтобы текст был виден мгновенно)
   // =====================================================================
   var fontStyle = document.createElement('style');
   fontStyle.textContent = '@font-face { font-display: swap !important; }';
   document.head.appendChild(fontStyle);
 
   // =====================================================================
-  // 4. LAZY LOADING для изображений ниже fold
+  // 3. SCRIPT DEFERRAL — MutationObserver перехватывает тяжёлые скрипты
+  // =====================================================================
+
+  // Категория A: полностью откладываем на 4с после load (маркетинг/эффекты)
+  var DEFER_ALWAYS = [
+    'bitrix24', 'b24-', 'cdn-ru.bitrix24.ru',
+    '101hotels', 'votpusk', 'snow', 'snowflake'
+  ];
+
+  // Категория B: откладываем до скролла к секции (тяжёлые виджеты ниже fold)
+  var DEFER_SCROLL = [
+    'tlintegration.ru',       // TravelLine IBE виджет
+    'travelline.ru/loader',   // TravelLine loader
+    'api-maps.yandex.ru'      // Яндекс Карты API
+  ];
+
+  function matchPatterns(src, patterns) {
+    if (!src) return false;
+    var s = src.toLowerCase();
+    for (var i = 0; i < patterns.length; i++) {
+      if (s.indexOf(patterns[i].toLowerCase()) !== -1) return true;
+    }
+    return false;
+  }
+
+  var deferredAlways = [];  // загрузим через 4с после load
+  var deferredScroll = [];  // загрузим когда юзер доскроллит
+
+  // MutationObserver перехватывает скрипты при вставке в DOM
+  var scriptObserver = new MutationObserver(function(mutations) {
+    for (var i = 0; i < mutations.length; i++) {
+      var nodes = mutations[i].addedNodes;
+      for (var j = 0; j < nodes.length; j++) {
+        var node = nodes[j];
+        if (node.tagName !== 'SCRIPT' || !node.src) continue;
+
+        if (matchPatterns(node.src, DEFER_ALWAYS)) {
+          deferredAlways.push(node.src);
+          node.parentNode.removeChild(node);
+        } else if (matchPatterns(node.src, DEFER_SCROLL)) {
+          deferredScroll.push(node.src);
+          node.parentNode.removeChild(node);
+        }
+      }
+    }
+  });
+
+  scriptObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
+
+  // Также перехватываем iframes (TravelLine IBE грузит кучу iframe-ов)
+  var iframeObserver = new MutationObserver(function(mutations) {
+    for (var i = 0; i < mutations.length; i++) {
+      var nodes = mutations[i].addedNodes;
+      for (var j = 0; j < nodes.length; j++) {
+        var node = nodes[j];
+        // Перехватываем TravelLine iframes
+        if (node.tagName === 'IFRAME' && node.src &&
+            (node.src.indexOf('travelline') !== -1 || node.src.indexOf('tlintegration') !== -1)) {
+          // Заменяем src на data-lazy-src для отложенной загрузки
+          node.setAttribute('data-lazy-src', node.src);
+          node.removeAttribute('src');
+        }
+      }
+    }
+  });
+
+  // =====================================================================
+  // 4. ЗАГРУЗКА ОТЛОЖЕННЫХ СКРИПТОВ
+  // =====================================================================
+
+  function loadScriptList(list, callback) {
+    var idx = 0;
+    function next() {
+      if (idx >= list.length) {
+        if (callback) callback();
+        return;
+      }
+      var s = document.createElement('script');
+      s.async = true;
+      s.src = list[idx++];
+      s.onload = s.onerror = function() { setTimeout(next, 100); };
+      document.body.appendChild(s);
+    }
+    next();
+  }
+
+  // Категория A: грузим через 4с после load
+  function loadDeferredAlways() {
+    scriptObserver.disconnect();
+    if (deferredAlways.length > 0) {
+      loadScriptList(deferredAlways);
+    }
+  }
+
+  // Категория B: грузим когда юзер скроллил ≥ 30% страницы ИЛИ через 8с после load
+  var scrollLoaded = false;
+  function loadDeferredScroll() {
+    if (scrollLoaded) return;
+    scrollLoaded = true;
+
+    // Отключаем iframe observer — больше не нужен
+    iframeObserver.disconnect();
+
+    if (deferredScroll.length > 0) {
+      loadScriptList(deferredScroll, function() {
+        // После загрузки скриптов, активируем lazy iframes
+        var lazyIframes = document.querySelectorAll('iframe[data-lazy-src]');
+        for (var i = 0; i < lazyIframes.length; i++) {
+          lazyIframes[i].src = lazyIframes[i].getAttribute('data-lazy-src');
+          lazyIframes[i].removeAttribute('data-lazy-src');
+        }
+      });
+    }
+  }
+
+  // Слушаем скролл — грузим тяжёлые виджеты когда юзер прокрутил 25% страницы
+  function onScroll() {
+    var scrolled = window.scrollY || window.pageYOffset;
+    var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    if (docHeight > 0 && scrolled / docHeight > 0.15) {
+      window.removeEventListener('scroll', onScroll);
+      loadDeferredScroll();
+    }
+  }
+
+  // Также слушаем касание на мобильных (первый touch = начало взаимодействия)
+  function onFirstInteraction() {
+    window.removeEventListener('touchstart', onFirstInteraction);
+    window.removeEventListener('mousedown', onFirstInteraction);
+    // Даём небольшую задержку после первого взаимодействия
+    setTimeout(loadDeferredScroll, 1500);
+  }
+
+  if (document.readyState === 'complete') {
+    setTimeout(loadDeferredAlways, 4000);
+    setTimeout(loadDeferredScroll, 8000); // fallback
+  } else {
+    window.addEventListener('load', function() {
+      setTimeout(loadDeferredAlways, 4000);
+      setTimeout(loadDeferredScroll, 8000); // fallback: грузим через 8с даже без скролла
+    });
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('touchstart', onFirstInteraction, { passive: true });
+  window.addEventListener('mousedown', onFirstInteraction, { passive: true });
+
+  // =====================================================================
+  // 5. LAZY IMAGES + HERO PRELOAD
   // =====================================================================
   function lazyImages() {
     if (!('loading' in HTMLImageElement.prototype)) return;
 
     var images = document.querySelectorAll('img:not([loading])');
-    // Первые 3 изображения (hero) — НЕ трогаем
-    for (var i = 3; i < images.length; i++) {
-      images[i].loading = 'lazy';
-      images[i].decoding = 'async';
+    // Первые 2 изображения (hero) — fetchpriority=high, остальные — lazy
+    for (var i = 0; i < images.length; i++) {
+      if (i < 2) {
+        images[i].fetchPriority = 'high';
+      } else {
+        images[i].loading = 'lazy';
+        images[i].decoding = 'async';
+      }
     }
   }
 
-  // =====================================================================
-  // 5. PRELOAD HERO IMAGE
-  // =====================================================================
   function preloadHero() {
     var firstBg = document.querySelector('.t-cover__carrier, .t-bgimg');
     if (firstBg) {
@@ -155,6 +224,7 @@
           preload.rel = 'preload';
           preload.as = 'image';
           preload.href = match[1];
+          preload.fetchPriority = 'high';
           document.head.appendChild(preload);
         }
       }
@@ -162,11 +232,25 @@
   }
 
   // =====================================================================
-  // 6. ЗАПУСК
+  // 6. ОТКЛЮЧЕНИЕ НЕНУЖНЫХ TILDA СКРИПТОВ (анимации, эффекты)
+  // =====================================================================
+  function disableHeavyTildaFeatures() {
+    // Tilda загружает анимационные скрипты — помечаем их как defer
+    var scripts = document.querySelectorAll('script[src*="tilda-animation"], script[src*="tilda-zero"]');
+    // Не удаляем — просто добавляем defer
+    for (var i = 0; i < scripts.length; i++) {
+      scripts[i].defer = true;
+    }
+  }
+
+  // =====================================================================
+  // 7. ЗАПУСК
   // =====================================================================
   function onReady() {
     lazyImages();
     preloadHero();
+    disableHeavyTildaFeatures();
+    iframeObserver.observe(document.body, { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') {
@@ -175,6 +259,6 @@
     onReady();
   }
 
-  console.log('[GOSH Booster] v1.1 initialized. Deferred scripts will load 4s after page load.');
+  console.log('[GOSH Booster] v2.0 — aggressive mobile optimization. TravelLine + Maps load on scroll.');
 
 })();
