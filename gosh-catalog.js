@@ -99,6 +99,15 @@
     388166: "/resource/thumb/400x300/rt/388166/639085009612060790-bcaa45d2-54cb-4457-a701-8e0726d82415"
   };
 
+  // ============= КАСТОМНЫЕ ФОТО ДЛЯ КАРТОЧЕК ЗДАНИЙ =============
+  // Чтобы заменить фото на карточке здания — добавь URL картинки по имени здания.
+  // Поддерживаются любые URL: GitHub CDN, TravelLine, Google Drive и др.
+  // Пример: "ЖК Паруса": "https://cdn.jsdelivr.net/gh/goshappartments-spec/gosh-cdn@main/img/parusa.jpg"
+  var customBuildingPhotos = {
+    // "ЖК Паруса": "https://...",
+    // "ЖК Салют": "https://...",
+  };
+
   var B = [
     {
       n: "ЖК Паруса",
@@ -807,6 +816,10 @@
 
   // ============= HELPER FUNCTIONS =============
   function getFirstRoomPhoto(building) {
+    // Приоритет: кастомное фото здания > фото первой квартиры из TravelLine
+    if (customBuildingPhotos[building.n]) {
+      return customBuildingPhotos[building.n];
+    }
     if (building.r && building.r.length > 0) {
       var roomId = building.r[0].id;
       return photos[roomId] ? PH + photos[roomId] : null;
