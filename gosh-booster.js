@@ -1,17 +1,13 @@
 /**
- * GOSH.RENT Performance Booster v1.0
+ * GOSH.RENT Performance Booster v1.1
  * ===================================
  * Безопасная оптимизация скорости для Tilda-сайта gosh.rent
  *
- * Стратегия:
- * 1. Preconnect к критичным доменам
- * 2. Перехват и отложенная загрузка тяжёлых сторонних скриптов
- * 3. Lazy-load iframes (карты, виджеты) через IntersectionObserver
- * 4. font-display: swap для всех шрифтов
- * 5. НЕ трогаем: Yandex Metrika, Roistat (аналитика), TravelLine
+ * Подход: MutationObserver перехватывает тяжёлые скрипты при вставке в DOM,
+ * удаляет их и загружает с задержкой 4 секунды после window.load.
  *
- * ВАЖНО: Roistat НЕ откладывается — это аналитика, должна грузиться сразу.
- * Откладываются только визуальные/маркетинговые виджеты.
+ * НЕ трогаем: Yandex Metrika, Roistat, TravelLine, Tilda CDN, jQuery, наши скрипты.
+ * Откладываем: Bitrix24, 101Hotels, vOtpusk, снежинки.
  */
 
 (function() {
@@ -36,9 +32,7 @@
     document.head.appendChild(link);
   }
 
-  // =====================================================================
-  // 2. DNS-PREFETCH — для вторичных доменов
-  // =====================================================================
+  // DNS-prefetch для вторичных доменов
   var dnsPrefetch = [
     'https://cllctr.roistat.com',
     'https://api-maps.yandex.ru',
@@ -54,11 +48,10 @@
   }
 
   // =====================================================================
-  // 3. ОТЛОЖЕННАЯ ЗАГРУЗКА ТЯЖЁЛЫХ СКРИПТОВ
+  // 2. ОТЛОЖЕННАЯ ЗАГРУЗКА ТЯЖЁЛЫХ СКРИПТОВ (MutationObserver)
   // =====================================================================
-  // Скрипты, которые нужно отложить на 4 секунды после load-события.
-  // Это виджеты/эффекты, которые НЕ влияют на аналитику и букинг.
 
+  // Паттерны для отложения (только маркетинговые виджеты/эффекты)
   var DEFER_PATTERNS = [
     'bitrix24',
     'b24-',
@@ -69,95 +62,55 @@
     'snowflake'
   ];
 
-  // Скрипты, которые НИКОГДА не откладываем (аналитика + букинг)
-  var NEVER_DEFER = [
-    'yandex',
-    'metrika',
-    'mc.yandex',
-    'travelline',
-    'secure.travelline',
-    'tlintegration',
-    'roistat',
-    'cllctr.roistat',
-    'cloud.roistat',
-    'tildacdn',
-    'tilda',
-    'jquery',
-    'jsdelivr',
-    'gosh-'
-  ];
-
   function shouldDefer(src) {
     if (!src) return false;
     var s = src.toLowerCase();
-
-    // Проверяем whitelist — если совпало, НЕ откладываем
-    for (var i = 0; i < NEVER_DEFER.length; i++) {
-      if (s.indexOf(NEVER_DEFER[i]) !== -1) return false;
-    }
-
-    // Проверяем blacklist — если совпало, откладываем
     for (var i = 0; i < DEFER_PATTERNS.length; i++) {
       if (s.indexOf(DEFER_PATTERNS[i]) !== -1) return true;
     }
-
     return false;
   }
 
-  // Хранилище отложенных скриптов
-  var deferredQueue = [];
+  var deferredScripts = [];
 
-  // Перехватываем создание <script> элементов
-  var _origCreate = document.createElement.bind(document);
-
-  document.createElement = function(tag) {
-    var el = _origCreate(tag);
-
-    if (tag.toLowerCase() === 'script') {
-      // Перехватываем установку src через defineProperty
-      var _realSrc = '';
-      var _blocked = false;
-
-      Object.defineProperty(el, 'src', {
-        get: function() { return _blocked ? '' : _realSrc; },
-        set: function(val) {
-          if (shouldDefer(val)) {
-            _blocked = true;
-            _realSrc = val;
-            deferredQueue.push({ src: val, async: el.async });
-            // Не устанавливаем реальный src — скрипт не загрузится
-          } else {
-            _realSrc = val;
-            // Устанавливаем src через setAttribute (обходим наш defineProperty)
-            el.setAttribute('src', val);
-          }
-        },
-        configurable: true
-      });
+  // MutationObserver перехватывает скрипты при вставке в DOM
+  var observer = new MutationObserver(function(mutations) {
+    for (var i = 0; i < mutations.length; i++) {
+      var addedNodes = mutations[i].addedNodes;
+      for (var j = 0; j < addedNodes.length; j++) {
+        var node = addedNodes[j];
+        if (node.tagName === 'SCRIPT' && node.src && shouldDefer(node.src)) {
+          // Сохраняем src и удаляем скрипт из DOM
+          deferredScripts.push(node.src);
+          node.parentNode.removeChild(node);
+        }
+      }
     }
+  });
 
-    return el;
-  };
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
 
-  // Загружаем отложенные скрипты через 4 секунды после window.load
+  // Загружаем отложенные скрипты через 4 секунды после load
   function loadDeferred() {
-    if (deferredQueue.length === 0) return;
+    observer.disconnect(); // Отключаем observer чтобы не перехватывать повторно
 
-    // Загружаем по одному с интервалом 200ms для плавности
+    if (deferredScripts.length === 0) return;
+
     var idx = 0;
     function loadNext() {
-      if (idx >= deferredQueue.length) return;
-      var item = deferredQueue[idx++];
-      var s = _origCreate('script');
+      if (idx >= deferredScripts.length) return;
+      var s = document.createElement('script');
       s.async = true;
-      s.setAttribute('src', item.src);
+      s.src = deferredScripts[idx++];
       document.body.appendChild(s);
       setTimeout(loadNext, 200);
     }
     loadNext();
   }
 
-  // Ждём load + 4 секунды
   if (document.readyState === 'complete') {
     setTimeout(loadDeferred, 4000);
   } else {
@@ -167,100 +120,40 @@
   }
 
   // =====================================================================
-  // 4. LAZY-LOAD IFRAMES (карты, виджеты бронирования)
+  // 3. FONT-DISPLAY: SWAP — предотвращаем FOIT (невидимый текст)
   // =====================================================================
-  function lazyIframes() {
-    var iframes = document.querySelectorAll('iframe[src]');
-    if (!iframes.length || !('IntersectionObserver' in window)) return;
-
-    var observer = new IntersectionObserver(function(entries) {
-      for (var i = 0; i < entries.length; i++) {
-        if (entries[i].isIntersecting) {
-          var iframe = entries[i].target;
-          var realSrc = iframe.getAttribute('data-lazy-src');
-          if (realSrc) {
-            iframe.src = realSrc;
-            iframe.removeAttribute('data-lazy-src');
-          }
-          observer.unobserve(iframe);
-        }
-      }
-    }, { rootMargin: '300px' });
-
-    for (var i = 0; i < iframes.length; i++) {
-      var iframe = iframes[i];
-      var src = iframe.src;
-
-      // Не трогаем критичные iframes
-      if (src.indexOf('travelline') !== -1 || src.indexOf('metrika') !== -1) continue;
-
-      // Конвертируем src → data-lazy-src для нека критичных
-      if (src.indexOf('yandex') !== -1 && src.indexOf('map') !== -1) {
-        iframe.setAttribute('data-lazy-src', src);
-        iframe.removeAttribute('src');
-        observer.observe(iframe);
-      }
-    }
-  }
+  var fontStyle = document.createElement('style');
+  fontStyle.textContent = '@font-face { font-display: swap !important; }';
+  document.head.appendChild(fontStyle);
 
   // =====================================================================
-  // 5. FONT-DISPLAY: SWAP — предотвращаем FOIT (невидимый текст)
-  // =====================================================================
-  function fixFontDisplay() {
-    var style = _origCreate('style');
-    style.textContent = '@font-face { font-display: swap !important; }';
-    document.head.appendChild(style);
-
-    // Пост-обработка: проходим по существующим @font-face и патчим
-    try {
-      for (var i = 0; i < document.styleSheets.length; i++) {
-        try {
-          var rules = document.styleSheets[i].cssRules;
-          if (!rules) continue;
-          for (var j = 0; j < rules.length; j++) {
-            if (rules[j].type === CSSRule.FONT_FACE_RULE) {
-              rules[j].style.fontDisplay = 'swap';
-            }
-          }
-        } catch(e) { /* cross-origin stylesheet, skip */ }
-      }
-    } catch(e) {}
-  }
-
-  // =====================================================================
-  // 6. NATIVE LAZY LOADING для изображений ниже fold
+  // 4. LAZY LOADING для изображений ниже fold
   // =====================================================================
   function lazyImages() {
     if (!('loading' in HTMLImageElement.prototype)) return;
 
     var images = document.querySelectorAll('img:not([loading])');
-    // Первые 3 изображения (hero area) — НЕ трогаем, остальным ставим lazy
+    // Первые 3 изображения (hero) — НЕ трогаем
     for (var i = 3; i < images.length; i++) {
       images[i].loading = 'lazy';
-      // Также добавляем decoding=async для параллельной декодировки
       images[i].decoding = 'async';
     }
   }
 
   // =====================================================================
-  // 7. TILDA-СПЕЦИФИЧНО: Оптимизация загрузки блоков
+  // 5. PRELOAD HERO IMAGE
   // =====================================================================
-  function optimizeTildaBlocks() {
-    // Tilda использует data-original для ленивых изображений.
-    // Убеждаемся, что IntersectionObserver корректно их подхватывает.
-
-    // Добавляем fetchpriority="high" для hero-изображения
+  function preloadHero() {
     var firstBg = document.querySelector('.t-cover__carrier, .t-bgimg');
     if (firstBg) {
       var bgUrl = firstBg.getAttribute('data-original') ||
                   getComputedStyle(firstBg).backgroundImage;
       if (bgUrl && bgUrl !== 'none') {
-        var preload = _origCreate('link');
-        preload.rel = 'preload';
-        preload.as = 'image';
-        // Извлекаем URL из url("...")
         var match = bgUrl.match(/url\(["']?([^"')]+)["']?\)/);
         if (match) {
+          var preload = document.createElement('link');
+          preload.rel = 'preload';
+          preload.as = 'image';
           preload.href = match[1];
           document.head.appendChild(preload);
         }
@@ -269,16 +162,11 @@
   }
 
   // =====================================================================
-  // 8. ЗАПУСК
+  // 6. ЗАПУСК
   // =====================================================================
-  // Шрифты — сразу
-  fixFontDisplay();
-
-  // Остальное — после DOM ready
   function onReady() {
     lazyImages();
-    lazyIframes();
-    optimizeTildaBlocks();
+    preloadHero();
   }
 
   if (document.readyState === 'loading') {
@@ -287,7 +175,6 @@
     onReady();
   }
 
-  // Лог для отладки
-  console.log('[GOSH Booster] v1.0 initialized. Deferred scripts will load 4s after page load.');
+  console.log('[GOSH Booster] v1.1 initialized. Deferred scripts will load 4s after page load.');
 
 })();
