@@ -274,9 +274,6 @@ function init(){
   }
 }
 
-// Load Yandex Maps
-var s=document.createElement('script');
-s.src='https://api-maps.yandex.ru/2.1/?lang=ru_RU';
-s.onload=function(){ymaps.ready(init);};
-document.head.appendChild(s);
+// Load Yandex Maps (skip if already loaded by other blocks)
+if(typeof ymaps!=='undefined'){ymaps.ready(init);}else{var s=document.createElement('script');s.src='https://api-maps.yandex.ru/2.1/?lang=ru_RU';s.onload=function(){ymaps.ready(init);};document.head.appendChild(s);}
 })();
