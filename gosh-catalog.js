@@ -386,34 +386,47 @@
   // ============= CSS =============
   var css = `
     #goshCatalog {
-      background: #0a0a0a;
-      color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
-      padding: 24px 0;
-      box-sizing: border-box;
+      background: #0a0a0a !important;
+      color: #ffffff !important;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif !important;
+      padding: 24px 0 !important;
+      box-sizing: border-box !important;
+      position: relative !important;
+      z-index: 50 !important;
+      width: 100% !important;
+      overflow: hidden !important;
+      margin: 0 !important;
+      display: block !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+      min-height: 400px !important;
     }
 
     #goshCatalog * {
-      box-sizing: border-box;
+      box-sizing: border-box !important;
     }
 
     .gosh-catalog-header {
-      padding: 0 24px 24px;
-      text-align: center;
+      padding: 0 24px 24px !important;
+      text-align: center !important;
+      background: transparent !important;
     }
 
     .gosh-catalog-header h2 {
-      font-size: 28px;
-      font-weight: 700;
-      margin: 0 0 8px 0;
-      letter-spacing: -0.5px;
+      font-size: 28px !important;
+      font-weight: 700 !important;
+      margin: 0 0 8px 0 !important;
+      letter-spacing: -0.5px !important;
+      color: #ffffff !important;
+      background: transparent !important;
     }
 
     .gosh-catalog-header p {
-      font-size: 14px;
-      color: #a0a0a0;
-      margin: 0;
-      font-weight: 400;
+      font-size: 14px !important;
+      color: #a0a0a0 !important;
+      margin: 0 !important;
+      font-weight: 400 !important;
+      background: transparent !important;
     }
 
     .gosh-carousel-container {
@@ -491,18 +504,20 @@
     }
 
     .gosh-building-card-name {
-      font-size: 20px;
-      font-weight: 700;
-      color: #d4af37;
-      margin: 0 0 6px 0;
-      letter-spacing: -0.3px;
+      font-size: 20px !important;
+      font-weight: 700 !important;
+      color: #d4af37 !important;
+      margin: 0 0 6px 0 !important;
+      letter-spacing: -0.3px !important;
+      background: transparent !important;
     }
 
     .gosh-building-card-address {
-      font-size: 13px;
-      color: #b0b0b0;
-      margin: 0 0 12px 0;
-      font-weight: 500;
+      font-size: 13px !important;
+      color: #b0b0b0 !important;
+      margin: 0 0 12px 0 !important;
+      font-weight: 500 !important;
+      background: transparent !important;
     }
 
     .gosh-building-card-meta {
@@ -666,11 +681,12 @@
     }
 
     .gosh-room-name {
-      font-size: 15px;
-      font-weight: 700;
-      color: #ffffff;
-      margin: 0 0 8px 0;
-      line-height: 1.3;
+      font-size: 15px !important;
+      font-weight: 700 !important;
+      color: #ffffff !important;
+      margin: 0 0 8px 0 !important;
+      line-height: 1.3 !important;
+      background: transparent !important;
     }
 
     .gosh-room-meta {
@@ -777,12 +793,13 @@
     }
 
     .gosh-expanded-title {
-      font-size: 20px;
-      font-weight: 700;
-      color: #d4af37;
-      margin: 0 0 20px 0;
-      padding: 0 0 12px 0;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+      font-size: 20px !important;
+      font-weight: 700 !important;
+      color: #d4af37 !important;
+      margin: 0 0 20px 0 !important;
+      padding: 0 0 12px 0 !important;
+      border-bottom: 1px solid rgba(212, 175, 55, 0.2) !important;
+      background: transparent !important;
     }
   `;
 
@@ -948,7 +965,7 @@
 
     var html = '<div class="gosh-catalog-header">' +
       '<h2>Выберите квартиру</h2>' +
-      '<p>Свежие объявления и луч предложения на любой вкус</p>' +
+      '<p>Свайпайте карточки и выбирайте подходящий адрес</p>' +
     '</div>' +
     '<div class="gosh-carousel-container">' +
       '<div class="gosh-carousel-track">';
