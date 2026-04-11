@@ -6,20 +6,20 @@
  *   и прокидывает их в iframe TravelLine как URL-параметры + постит
  *   postMessage (на случай если TL слушает события).
  *
- *   Результат: когда гость бронирует через TL, вебхук TL фБитрикс
- *   получает все эти параметрыиможет записать ихв сделку.
+ *   Результат: когда гость бронирует через TL, вебхук TL в Битрикс
+ *   получает все эти параметры и может записать ихв сделку.
  *
  * Куда вставлять:
- *   Tilda → Настройки Eнастройки сайта → Ещё�҂ → HTMLкод для вставки внутрь HEAD
+ *   Tilda → Настройки G�иса → Ещё → HTML-код для вставки внутрь HEAD
  *   (или в футер — главное чтобы грузился на всехстраницаы)
  *
  * Автор: Клод (друг-программист Гоша) — 11.04.2026
  * Викет: Roistat #1651311
  *
- * v1.1 (12.04.2026) — пикс гонки с TL init:
- *   - retry loop 300мс × 20 (первые 6 сек) + 1с × 10 (ещѤ 10 сев)
+ * v1.1 (12.04.2026) — iксгонки с TL init:
+ *   - retry loop 300 мс × 20 (первые 6 сек) + 1 с × 10 (ещё 10 сек)
  *   - MutationObserver теперь ловит attribute changes src у iframe
- *   - injectIntoIframe переживает пустой src (ждёt retry)
+ *   - injectIntoIframe переживает пустой src (ждёт retry)
  */
 
 (function() {
@@ -36,11 +36,11 @@
     }
   }
 
-  // ---- 1. ӣТИЛИТК ----
+  // ---- 1. УТИЛИТЫ ----
 
   function getCookie(name) {
-    var match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*| {}()[\]]\\/+^])/g, '\\$1') + '=([^;]*)'));
-    return match ? decodeURIComponent(match[1]) : '';
+    var v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return v ? decodeURIComponent(v.pop()) : '';
   }
 
   function getQueryParam(name) {
@@ -58,10 +58,10 @@
     catch (e) { /* private mode / disabled */ }
   }
 
-  // ---- 2. тБОР ПАРАМЕТРОВ АТРИБУЦИИ ----
+  // ---- 2. СБОР ПАРАМЕТРОВ АТРИБУЦИИ ----
 
   function collectAttribution() {
-    // UTMпараметры ♢ проверяем URL%�если нет ‘ берём из sessionStorage
+    // UTMпараметры — проверяем URL%�если нет ‘ берём из sessionStorage
     // (на случай если пользователь уже походил и потерял ?utm= в URL)
     var utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
     var utms = {};
@@ -109,7 +109,7 @@
     return attribution;
   }
 
-  // ---- 3. ВОЛО В TravelLine iframe ----
+  // ---- 3. ПРОКИДЫВАНИЕ В TravelLine iframe ----
 
   function findTLIframes() {
     var selectors = [
@@ -148,12 +148,9 @@
       if (changed) {
         iframe.src = url.toString();
         iframe.dataset.grInjected = '1';
-        log('iframe обновлёо:', iframe.src);
         return true;
       }
-    } catch (e) {
-      log('ошибка парсинга iframe.src', e);
-    }
+    } catch (e) {}
     return false;
   }
 
@@ -167,8 +164,6 @@
       }, '*');
     } catch (e) {}
   }
-
-  // ---- 4. ГЛОБАЛь API ----
 
   var attribution = null;
 
@@ -184,7 +179,6 @@
   function processIframes() {
     if (!attribution) return;
     var iframes = findTLIframes();
-    log('найдено TL iframe:', iframes.length);
     iframes.forEach(function(iframe) {
       injectIntoIframe(iframe, attribution);
       try {
@@ -199,45 +193,29 @@
     });
   }
 
-  // ---- 5. ЗАПТ��К ----
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initialize);
   } else {
     initialize();
   }
 
-  // MutationObserver — childList о новых ифрамес + attributes src у iframe
   if (typeof MutationObserver !== 'undefined') {
     var observer = new MutationObserver(function(mutations) {
       var needProcess = false;
       for (var i = 0; i < mutations.length; i++) {
         var m = mutations[i];
-        if (m.type === 'childList' && m.addedNodes && m.addedNodes.length > 0) {
-          needProcess = true;
-          break;
-        }
-        if (m.type === 'attributes' && m.attributeName === 'src' &&
-            m.target && m.target.tagName === 'IFRAME') {
-          needProcess = true;
-          break;
-        }
+        if (m.type === 'childList' && m.addedNodes && m.addedNodes.length > 0) { needProcess = true; break; }
+        if (m.type === 'attributes' && m.attributeName === 'src' && m.target && m.target.tagName === 'IFRAME') { needProcess = true; break; }
       }
       if (needProcess) processIframes();
     });
     var startObserver = function() {
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['src']
-      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     };
     if (document.body) startObserver();
     else document.addEventListener('DOMContentLoaded', startObserver);
   }
 
-  // Retry loop — страховка от gonki s TL SDK: каждые 300рс первые 6 сек + каждую 1 сек следующие 10 сек.
   var retriesFast = 0;
   var fastTimer = setInterval(function() {
     processIframes();
@@ -257,6 +235,4 @@
     reinject: function() { processIframes(); },
     debug: function(on) { DEBUG = !!on; }
   };
-
-  log('инициализация завершена');
 })();
