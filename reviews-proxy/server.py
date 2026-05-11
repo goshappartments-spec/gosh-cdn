@@ -1,12 +1,13 @@
-"""gosh.rent — Travelline Reviews Proxy v2 (verbose logging)"""
+"""gosh.rent — Travelline Reviews Proxy v3
+Использует stats endpoint + первую страницу свежих отзывов.
+Никакой pagination — быстро, надёжно, без token expiry."""
 import os, sys, json, time, threading, urllib.request, urllib.parse, traceback
-from collections import defaultdict
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 def log(*a):
-    msg = "[" + time.strftime("%H:%M:%S") + "] " + " ".join(str(x) for x in a)
-    print(msg, flush=True); sys.stdout.flush()
+    print("[" + time.strftime("%H:%M:%S") + "] " + " ".join(str(x) for x in a), flush=True)
+    sys.stdout.flush()
 
 app = Flask(__name__)
 CORS(app, origins=["*"])
@@ -25,6 +26,8 @@ SOURCES = {"1":"Booking.com","2":"TripAdvisor","3":"Hotels.com","4":"TopHotels",
 
 CACHE = {"stats": None, "reviews": [], "updatedAt": None, "lastError": None, "progress": "idle"}
 
+BASE = "https://partner.tlintegration.com/api/reputation-public-reviews"
+
 def get_token():
     log("  get_token: POST /auth/token")
     req = urllib.request.Request(
@@ -35,87 +38,94 @@ def get_token():
             "client_secret":TL_CLIENT_SECRET,
         }).encode(),
         headers={"Content-Type":"application/x-www-form-urlencoded"})
-    resp = urllib.request.urlopen(req, timeout=20).read()
-    token = json.loads(resp)["access_token"]
-    log(f"  get_token: OK, token_len={len(token)}")
-    return token
+    return json.loads(urllib.request.urlopen(req, timeout=20).read())["access_token"]
 
-def fetch_all_reviews(token):
-    reviews = []
-    next_token = ""
-    pages = 0
-    base = f"https://partner.tlintegration.com/api/reputation-public-reviews/v1/properties/{PROPERTY_ID}/reviews"
-    log(f"  fetch_all: starting pagination from {base}")
-    while True:
-        url = base + (f"?nextPageToken={urllib.parse.quote(next_token)}" if next_token else "")
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
-        try:
-            data = json.loads(urllib.request.urlopen(req, timeout=20).read())
-        except Exception as e:
-            log(f"  fetch_all: page {pages+1} FAILED: {type(e).__name__}: {e}")
-            raise
-        rs = data.get("reviews", [])
-        reviews.extend(rs)
-        pages += 1
-        if pages % 20 == 0:
-            log(f"  fetch_all: progress {pages} pages, {len(reviews)} reviews")
-            CACHE["progress"] = f"{pages} pages, {len(reviews)} reviews"
-        if not data.get("hasNextPage") or pages > 500:
-            log(f"  fetch_all: DONE {pages} pages, {len(reviews)} total reviews")
-            break
-        next_token = data.get("nextPageToken","")
-        time.sleep(0.4)
+def fetch_total_stats(token):
+    """Total averageRating + reviewsCount across all sources."""
+    log("  fetching total stats")
+    url = f"{BASE}/v1/properties/{PROPERTY_ID}/reviews/stats"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    data = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    log(f"  stats: {data}")
+    return data  # {"averageRating": 9.5, "reviewsCount": 1578}
+
+def fetch_latest_reviews(token, count=30):
+    """Just the first page — newest reviews (default sort)."""
+    log(f"  fetching {count} latest reviews")
+    url = f"{BASE}/v1/properties/{PROPERTY_ID}/reviews"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    data = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    reviews = data.get("reviews", [])[:count]
+    log(f"  got {len(reviews)} reviews")
     return reviews
 
 def refresh():
     log("=== REFRESH START ===")
-    CACHE["progress"] = "starting"
+    CACHE["progress"] = "fetching"
     try:
         token = get_token()
-        CACHE["progress"] = "fetching reviews"
-        reviews = fetch_all_reviews(token)
-        log(f"  aggregating {len(reviews)} reviews...")
+        total = fetch_total_stats(token)
+        latest = fetch_latest_reviews(token, count=30)
+
+        # Aggregate by source from this page only (limited but real)
+        from collections import defaultdict
         agg = defaultdict(lambda: {"sum":0,"n":0,"latest":None})
-        for r in reviews:
+        for r in latest:
             sid = r["sourceId"]
             agg[sid]["sum"] += r["rating"]
             agg[sid]["n"] += 1
             if not agg[sid]["latest"] or r["publishDate"] > agg[sid]["latest"]:
                 agg[sid]["latest"] = r["publishDate"]
-        total_sum = sum(a["sum"] for a in agg.values())
-        total_n = sum(a["n"] for a in agg.values()) or 1
+
         stats = {
-            "total": {"averageRating10": round(total_sum/total_n,2), "averageRating5": round(total_sum/total_n/2,2), "reviewsCount": total_n},
-            "bySource": {SOURCES.get(sid,f"id{sid}"): {"avg10":round(a["sum"]/a["n"],2),"avg5":round(a["sum"]/a["n"]/2,2),"count":a["n"],"latest":a["latest"][:10] if a["latest"] else None} for sid,a in agg.items()},
+            "total": {
+                "averageRating10": round(total.get("averageRating", 0), 2),
+                "averageRating5": round(total.get("averageRating", 0)/2, 2),
+                "reviewsCount": total.get("reviewsCount", 0),
+            },
+            "bySourceRecent": {SOURCES.get(sid,f"id{sid}"): {
+                "avg10": round(a["sum"]/a["n"],2),
+                "avg5": round(a["sum"]/a["n"]/2,2),
+                "count": a["n"],
+                "latest": a["latest"][:10] if a["latest"] else None,
+            } for sid,a in agg.items()},
+            "_note": "bySourceRecent reflects last ~30 reviews. Total — full property aggregate from TL.",
             "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-        latest_top = sorted([r for r in reviews if r["rating"]>=9 and r.get("originalText")], key=lambda x:x["publishDate"], reverse=True)[:12]
+
+        # Top reviews for carousel — 5★ only
+        top = [r for r in latest if r["rating"] >= 9 and r.get("originalText")][:12]
         CACHE["stats"] = stats
-        CACHE["reviews"] = [{"id":r["id"],"author":r["authorName"],"date":r["publishDate"][:10],"rating10":r["rating"],"rating5":round(r["rating"]/2,1),"text":r["originalText"],"source":SOURCES.get(r["sourceId"],r["sourceId"])} for r in latest_top]
+        CACHE["reviews"] = [{
+            "id": r["id"],
+            "author": r["authorName"],
+            "date": r["publishDate"][:10],
+            "rating10": r["rating"],
+            "rating5": round(r["rating"]/2, 1),
+            "text": r["originalText"],
+            "source": SOURCES.get(r["sourceId"], r["sourceId"]),
+        } for r in top]
         CACHE["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
         CACHE["progress"] = "complete"
         CACHE["lastError"] = None
-        log(f"  ✓ REFRESH DONE: {total_n} reviews, {len(agg)} sources, avg={total_sum/total_n:.2f}")
+        log(f"  ✓ DONE: total {total.get('reviewsCount')} reviews, avg {total.get('averageRating')}, {len(CACHE['reviews'])} for carousel")
     except Exception as e:
-        tb = traceback.format_exc()
-        log(f"  ✗ REFRESH FAILED: {type(e).__name__}: {e}")
-        for line in tb.split("\n"): log("    " + line)
+        log(f"  ✗ FAILED: {type(e).__name__}: {e}")
+        for line in traceback.format_exc().split("\n"): log("    " + line)
         CACHE["lastError"] = f"{type(e).__name__}: {e}"
         CACHE["progress"] = "failed"
 
 def bg_refresher():
     while True:
-        if not CACHE["stats"]:
-            refresh()
-        time.sleep(REFRESH_INTERVAL)
         refresh()
+        time.sleep(REFRESH_INTERVAL)
 
 threading.Thread(target=bg_refresher, daemon=True).start()
 log("Background refresher started")
 
 @app.route("/")
 def index():
-    return jsonify({"service":"gosh.rent reviews proxy","cache_updated":CACHE["updatedAt"],"progress":CACHE["progress"],"lastError":CACHE["lastError"],"endpoints":["/api/stats","/api/reviews","/api/debug"]})
+    return jsonify({"service":"gosh.rent reviews proxy v3","cache_updated":CACHE["updatedAt"],"progress":CACHE["progress"],"lastError":CACHE["lastError"],"endpoints":["/api/stats","/api/reviews","/api/debug"]})
 
 @app.route("/api/stats")
 def api_stats():
